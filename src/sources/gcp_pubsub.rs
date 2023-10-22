@@ -991,9 +991,11 @@ mod integration_tests {
         components::init_test();
 
         let tls_settings = TlsSettings::from_options(&None).unwrap();
-        let client = HttpClient::new(tls_settings, &ProxyConfig::default()).unwrap();
+        let proxy = ProxyConfig::from_env();
+        let client = HttpClient::new(tls_settings, &proxy).unwrap();
         let tester = Tester::new(client).await;
-
+        debug!("Debug For Proxy")
+        debug!(&proxy)
         let (rx, shutdown) = tester.spawn_source(status).await;
 
         (tester, rx, shutdown)
