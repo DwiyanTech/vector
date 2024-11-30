@@ -4,6 +4,7 @@ use chrono::SecondsFormat;
 use csv_core::{WriteResult, Writer, WriterBuilder};
 use lookup::lookup_v2::ConfigTargetPath;
 use tokio_util::codec::Encoder;
+use vector_config_macros::configurable_component;
 use vector_core::{
     config::DataType,
     event::{Event, Value},
@@ -11,7 +12,7 @@ use vector_core::{
 };
 
 /// The user configuration to choose the metric tag strategy.
-#[crate::configurable_component]
+#[configurable_component]
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum QuoteStyle {
@@ -35,7 +36,7 @@ pub enum QuoteStyle {
 }
 
 /// Config used to build a `CsvSerializer`.
-#[crate::configurable_component]
+#[configurable_component]
 #[derive(Debug, Clone)]
 pub struct CsvSerializerConfig {
     /// The CSV Serializer Options.
@@ -71,14 +72,15 @@ impl CsvSerializerConfig {
 }
 
 /// Config used to build a `CsvSerializer`.
-#[crate::configurable_component]
+#[configurable_component]
 #[derive(Debug, Clone)]
 pub struct CsvSerializerOptions {
     /// The field delimiter to use when writing CSV.
+    #[configurable(metadata(docs::type_override = "ascii_char"))]
     #[serde(
         default = "default_delimiter",
         with = "vector_core::serde::ascii_char",
-        skip_serializing_if = "vector_core::serde::skip_serializing_if_default"
+        skip_serializing_if = "vector_core::serde::is_default"
     )]
     pub delimiter: u8,
 
@@ -88,7 +90,7 @@ pub struct CsvSerializerOptions {
     /// field data are escaped instead of doubled.
     #[serde(
         default = "default_double_quote",
-        skip_serializing_if = "vector_core::serde::skip_serializing_if_default"
+        skip_serializing_if = "vector_core::serde::is_default"
     )]
     pub double_quote: bool,
 
@@ -98,26 +100,25 @@ pub struct CsvSerializerOptions {
     /// like \ (instead of escaping quotes by doubling them).
     ///
     /// To use this, `double_quotes` needs to be disabled as well otherwise it is ignored.
+    #[configurable(metadata(docs::type_override = "ascii_char"))]
     #[serde(
         default = "default_escape",
         with = "vector_core::serde::ascii_char",
-        skip_serializing_if = "vector_core::serde::skip_serializing_if_default"
+        skip_serializing_if = "vector_core::serde::is_default"
     )]
     pub escape: u8,
 
     /// The quote character to use when writing CSV.
+    #[configurable(metadata(docs::type_override = "ascii_char"))]
     #[serde(
         default = "default_escape",
         with = "vector_core::serde::ascii_char",
-        skip_serializing_if = "vector_core::serde::skip_serializing_if_default"
+        skip_serializing_if = "vector_core::serde::is_default"
     )]
     quote: u8,
 
     /// The quoting style to use when writing CSV data.
-    #[serde(
-        default,
-        skip_serializing_if = "vector_core::serde::skip_serializing_if_default"
-    )]
+    #[serde(default, skip_serializing_if = "vector_core::serde::is_default")]
     pub quote_style: QuoteStyle,
 
     /// Set the capacity (in bytes) of the internal buffer used in the CSV writer.
@@ -309,20 +310,20 @@ mod tests {
     use chrono::DateTime;
     use ordered_float::NotNan;
     use vector_common::btreemap;
-    use vector_core::event::{LogEvent, Value};
+    use vector_core::event::{LogEvent, ObjectMap, Value};
 
     use super::*;
 
     fn make_event_with_fields(field_data: Vec<(&str, &str)>) -> (Vec<ConfigTargetPath>, Event) {
         let mut fields: Vec<ConfigTargetPath> = std::vec::Vec::new();
-        let mut tree = std::collections::BTreeMap::new();
+        let mut tree = ObjectMap::new();
 
-        for (field_name, field_value) in field_data.iter() {
-            let field = ConfigTargetPath::try_from(field_name.to_string()).unwrap();
+        for (field_name, field_value) in field_data.into_iter() {
+            let field = field_name.into();
             fields.push(field);
 
             let field_value = Value::from(field_value.to_string());
-            tree.insert(field_name.to_string().clone(), field_value);
+            tree.insert(field_name.into(), field_value);
         }
 
         let event = Event::Log(LogEvent::from(tree));
@@ -351,15 +352,15 @@ mod tests {
             "other" => Value::from("data"),
         }));
         let fields = vec![
-            ConfigTargetPath::try_from("foo".to_string()).unwrap(),
-            ConfigTargetPath::try_from("int".to_string()).unwrap(),
-            ConfigTargetPath::try_from("comma".to_string()).unwrap(),
-            ConfigTargetPath::try_from("float".to_string()).unwrap(),
-            ConfigTargetPath::try_from("missing".to_string()).unwrap(),
-            ConfigTargetPath::try_from("space".to_string()).unwrap(),
-            ConfigTargetPath::try_from("time".to_string()).unwrap(),
-            ConfigTargetPath::try_from("quote".to_string()).unwrap(),
-            ConfigTargetPath::try_from("bool".to_string()).unwrap(),
+            "foo".into(),
+            "int".into(),
+            "comma".into(),
+            "float".into(),
+            "missing".into(),
+            "space".into(),
+            "time".into(),
+            "quote".into(),
+            "bool".into(),
         ];
 
         let opts = CsvSerializerOptions {
@@ -388,11 +389,11 @@ mod tests {
             "field5" => Value::from("value5"),
         }));
         let fields = vec![
-            ConfigTargetPath::try_from("field1".to_string()).unwrap(),
-            ConfigTargetPath::try_from("field5".to_string()).unwrap(),
-            ConfigTargetPath::try_from("field5".to_string()).unwrap(),
-            ConfigTargetPath::try_from("field3".to_string()).unwrap(),
-            ConfigTargetPath::try_from("field2".to_string()).unwrap(),
+            "field1".into(),
+            "field5".into(),
+            "field5".into(),
+            "field3".into(),
+            "field2".into(),
         ];
         let opts = CsvSerializerOptions {
             fields,
@@ -419,10 +420,10 @@ mod tests {
             "field4" => Value::from("baz,bas"),
         }));
         let fields = vec![
-            ConfigTargetPath::try_from("field1".to_string()).unwrap(),
-            ConfigTargetPath::try_from("field2".to_string()).unwrap(),
-            ConfigTargetPath::try_from("field3".to_string()).unwrap(),
-            ConfigTargetPath::try_from("field4".to_string()).unwrap(),
+            "field1".into(),
+            "field2".into(),
+            "field3".into(),
+            "field4".into(),
         ];
 
         let mut default_bytes = BytesMut::new();

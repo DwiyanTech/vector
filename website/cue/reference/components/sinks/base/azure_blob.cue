@@ -15,8 +15,8 @@ base: components: sinks: azure_blob: configuration: {
 				Whether or not end-to-end acknowledgements are enabled.
 
 				When enabled for a sink, any source connected to that sink, where the source supports
-				end-to-end acknowledgements as well, waits for events to be acknowledged by the sink
-				before acknowledging them at the source.
+				end-to-end acknowledgements as well, waits for events to be acknowledged by **all
+				connected** sinks before acknowledging them at the source.
 
 				Enabling or disabling acknowledgements at the sink level takes precedence over any global
 				[`acknowledgements`][global_acks] configuration.
@@ -116,6 +116,9 @@ base: components: sinks: azure_blob: configuration: {
 			Compression configuration.
 
 			All compression algorithms use the default compression level unless otherwise specified.
+
+			Some cloud storage API clients and browsers handle decompression transparently, so
+			depending on how they are accessed, files may not always appear to be compressed.
 			"""
 		required: false
 		type: string: {
@@ -127,6 +130,11 @@ base: components: sinks: azure_blob: configuration: {
 					[gzip]: https://www.gzip.org/
 					"""
 				none: "No compression."
+				snappy: """
+					[Snappy][snappy] compression.
+
+					[snappy]: https://github.com/google/snappy/blob/main/docs/README.md
+					"""
 				zlib: """
 					[Zlib][zlib] compression.
 
@@ -144,12 +152,23 @@ base: components: sinks: azure_blob: configuration: {
 		description: """
 			The Azure Blob Storage Account connection string.
 
-			Authentication with access key is the only supported authentication method.
+			Authentication with an access key or shared access signature (SAS)
+			are supported authentication methods. If using a non-account SAS,
+			healthchecks will fail and will need to be disabled by setting
+			`healthcheck.enabled` to `false` for this sink
+
+			When generating an account SAS, the following are the minimum required option
+			settings for Vector to access blob storage and pass a health check.
+			| Option                 | Value              |
+			| ---------------------- | ------------------ |
+			| Allowed services       | Blob               |
+			| Allowed resource types | Container & Object |
+			| Allowed permissions    | Read & Create      |
 
 			Either `storage_account`, or this field, must be specified.
 			"""
 		required: false
-		type: string: examples: ["DefaultEndpointsProtocol=https;AccountName=mylogstorage;AccountKey=storageaccountkeybase64encoded;EndpointSuffix=core.windows.net"]
+		type: string: examples: ["DefaultEndpointsProtocol=https;AccountName=mylogstorage;AccountKey=storageaccountkeybase64encoded;EndpointSuffix=core.windows.net", "BlobEndpoint=https://mylogstorage.blob.core.windows.net/;SharedAccessSignature=generatedsastoken"]
 	}
 	container_name: {
 		description: "The Azure Blob Storage Account container name."
@@ -170,6 +189,91 @@ base: components: sinks: azure_blob: configuration: {
 					type: string: examples: ["{ \"type\": \"record\", \"name\": \"log\", \"fields\": [{ \"name\": \"message\", \"type\": \"string\" }] }"]
 				}
 			}
+			cef: {
+				description:   "The CEF Serializer Options."
+				relevant_when: "codec = \"cef\""
+				required:      true
+				type: object: options: {
+					device_event_class_id: {
+						description: """
+																Unique identifier for each event type. Identifies the type of event reported.
+																The value length must be less than or equal to 1023.
+																"""
+						required: true
+						type: string: {}
+					}
+					device_product: {
+						description: """
+																Identifies the product of a vendor.
+																The part of a unique device identifier. No two products can use the same combination of device vendor and device product.
+																The value length must be less than or equal to 63.
+																"""
+						required: true
+						type: string: {}
+					}
+					device_vendor: {
+						description: """
+																Identifies the vendor of the product.
+																The part of a unique device identifier. No two products can use the same combination of device vendor and device product.
+																The value length must be less than or equal to 63.
+																"""
+						required: true
+						type: string: {}
+					}
+					device_version: {
+						description: """
+																Identifies the version of the problem. In combination with device product and vendor, it composes the unique id of the device that sends messages.
+																The value length must be less than or equal to 31.
+																"""
+						required: true
+						type: string: {}
+					}
+					extensions: {
+						description: """
+																The collection of key-value pairs. Keys are the keys of the extensions, and values are paths that point to the extension values of a log event.
+																The event can have any number of key-value pairs in any order.
+																"""
+						required: false
+						type: object: options: "*": {
+							description: "This is a path that points to the extension value of a log event."
+							required:    true
+							type: string: {}
+						}
+					}
+					name: {
+						description: """
+																This is a path that points to the human-readable description of a log event.
+																The value length must be less than or equal to 512.
+																Equals "cef.name" by default.
+																"""
+						required: true
+						type: string: {}
+					}
+					severity: {
+						description: """
+																This is a path that points to the field of a log event that reflects importance of the event.
+																Reflects importance of the event.
+
+																It must point to a number from 0 to 10.
+																0 = Lowest, 10 = Highest.
+																Equals to "cef.severity" by default.
+																"""
+						required: true
+						type: string: {}
+					}
+					version: {
+						description: """
+																CEF Version. Can be either 0 or 1.
+																Equals to "0" by default.
+																"""
+						required: true
+						type: string: enum: {
+							V0: "CEF specification version 0.1."
+							V1: "CEF specification version 1.x."
+						}
+					}
+				}
+			}
 			codec: {
 				description: "The codec to use for encoding events."
 				required:    true
@@ -179,6 +283,7 @@ base: components: sinks: azure_blob: configuration: {
 
 						[apache_avro]: https://avro.apache.org/
 						"""
+					cef: "Encodes an event as a CEF (Common Event Format) formatted message."
 					csv: """
 						Encodes an event as a CSV message.
 
@@ -187,7 +292,20 @@ base: components: sinks: azure_blob: configuration: {
 					gelf: """
 						Encodes an event as a [GELF][gelf] message.
 
+						This codec is experimental for the following reason:
+
+						The GELF specification is more strict than the actual Graylog receiver.
+						Vector's encoder currently adheres more strictly to the GELF spec, with
+						the exception that some characters such as `@`  are allowed in field names.
+
+						Other GELF codecs such as Loki's, use a [Go SDK][implementation] that is maintained
+						by Graylog, and is much more relaxed than the GELF spec.
+
+						Going forward, Vector will use that [Go SDK][implementation] as the reference implementation, which means
+						the codec may continue to relax the enforcement of specification.
+
 						[gelf]: https://docs.graylog.org/docs/gelf
+						[implementation]: https://github.com/Graylog2/go-gelf/blob/v2/gelf/reader.go
 						"""
 					json: """
 						Encodes an event as [JSON][json].
@@ -257,7 +375,7 @@ base: components: sinks: azure_blob: configuration: {
 					delimiter: {
 						description: "The field delimiter to use when writing CSV."
 						required:    false
-						type: uint: default: 44
+						type: ascii_char: default: ","
 					}
 					double_quote: {
 						description: """
@@ -279,7 +397,7 @@ base: components: sinks: azure_blob: configuration: {
 																To use this, `double_quotes` needs to be disabled as well otherwise it is ignored.
 																"""
 						required: false
-						type: uint: default: 34
+						type: ascii_char: default: "\""
 					}
 					fields: {
 						description: """
@@ -297,7 +415,7 @@ base: components: sinks: azure_blob: configuration: {
 					quote: {
 						description: "The quote character to use when writing CSV."
 						required:    false
-						type: uint: default: 34
+						type: ascii_char: default: "\""
 					}
 					quote_style: {
 						description: "The quoting style to use when writing CSV data."
@@ -327,6 +445,16 @@ base: components: sinks: azure_blob: configuration: {
 				description: "List of fields that are excluded from the encoded event."
 				required:    false
 				type: array: items: type: string: {}
+			}
+			json: {
+				description:   "Options for the JsonSerializer."
+				relevant_when: "codec = \"json\""
+				required:      false
+				type: object: options: pretty: {
+					description: "Whether to use pretty JSON formatting."
+					required:    false
+					type: bool: default: false
+				}
 			}
 			metric_tag_values: {
 				description: """
@@ -415,7 +543,34 @@ base: components: sinks: azure_blob: configuration: {
 				type: object: options: delimiter: {
 					description: "The ASCII (7-bit) character that delimits byte sequences."
 					required:    true
-					type: uint: {}
+					type: ascii_char: {}
+				}
+			}
+			length_delimited: {
+				description:   "Options for the length delimited decoder."
+				relevant_when: "method = \"length_delimited\""
+				required:      true
+				type: object: options: {
+					length_field_is_big_endian: {
+						description: "Length field byte order (little or big endian)"
+						required:    false
+						type: bool: default: true
+					}
+					length_field_length: {
+						description: "Number of bytes representing the field length"
+						required:    false
+						type: uint: default: 4
+					}
+					length_field_offset: {
+						description: "Number of bytes in the header before the length field"
+						required:    false
+						type: uint: default: 0
+					}
+					max_frame_length: {
+						description: "Maximum frame length"
+						required:    false
+						type: uint: default: 8388608
+					}
 				}
 			}
 			method: {
@@ -438,7 +593,9 @@ base: components: sinks: azure_blob: configuration: {
 		description: """
 			Middleware settings for outbound requests.
 
-			Various settings can be configured, such as concurrency and rate limits, timeouts, etc.
+			Various settings can be configured, such as concurrency and rate limits, timeouts, retry behavior, etc.
+
+			Note that the retry backoff policy follows the Fibonacci sequence.
 			"""
 		required: false
 		type: object: options: {
@@ -486,6 +643,15 @@ base: components: sinks: azure_blob: configuration: {
 																"""
 						required: false
 						type: uint: default: 1
+					}
+					max_concurrency_limit: {
+						description: """
+																The maximum concurrency limit.
+
+																The adaptive request concurrency limit will not go above this bound. This is put in place as a safeguard.
+																"""
+						required: false
+						type: uint: default: 200
 					}
 					rtt_deviation_scale: {
 						description: """
@@ -542,17 +708,13 @@ base: components: sinks: azure_blob: configuration: {
 				description: "The maximum number of requests allowed within the `rate_limit_duration_secs` time window."
 				required:    false
 				type: uint: {
-					default: 9223372036854775807
+					default: 250
 					unit:    "requests"
 				}
 			}
 			retry_attempts: {
-				description: """
-					The maximum number of retries to make for failed requests.
-
-					The default, for all intents and purposes, represents an infinite number of retries.
-					"""
-				required: false
+				description: "The maximum number of retries to make for failed requests."
+				required:    false
 				type: uint: {
 					default: 9223372036854775807
 					unit:    "retries"
@@ -570,11 +732,31 @@ base: components: sinks: azure_blob: configuration: {
 					unit:    "seconds"
 				}
 			}
+			retry_jitter_mode: {
+				description: "The jitter mode to use for retry backoff behavior."
+				required:    false
+				type: string: {
+					default: "Full"
+					enum: {
+						Full: """
+															Full jitter.
+
+															The random delay is anywhere from 0 up to the maximum current delay calculated by the backoff
+															strategy.
+
+															Incorporating full jitter into your backoff strategy can greatly reduce the likelihood
+															of creating accidental denial of service (DoS) conditions against your own systems when
+															many clients are recovering from a failure state.
+															"""
+						None: "No jitter."
+					}
+				}
+			}
 			retry_max_duration_secs: {
 				description: "The maximum amount of time to wait between retries."
 				required:    false
 				type: uint: {
-					default: 3600
+					default: 30
 					unit:    "seconds"
 				}
 			}

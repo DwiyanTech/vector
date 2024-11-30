@@ -10,6 +10,7 @@ pub mod grpc;
     feature = "sources-utils-http-auth",
     feature = "sources-utils-http-encoding",
     feature = "sources-utils-http-error",
+    feature = "sources-utils-http-headers",
     feature = "sources-utils-http-prelude",
     feature = "sources-utils-http-query"
 ))]
@@ -48,6 +49,8 @@ pub use wrappers::{AfterRead, AfterReadExt};
 
 #[cfg(feature = "sources-http_server")]
 pub use self::body_decoding::Encoding;
+#[cfg(feature = "sources-utils-http-headers")]
+pub use self::http::add_headers;
 #[cfg(feature = "sources-utils-http-query")]
 pub use self::http::add_query_parameters;
 #[cfg(any(
@@ -74,8 +77,8 @@ pub use self::message_decoding::decode_message;
 #[cfg(any(feature = "sources-statsd", feature = "sources-datadog_agent"))]
 pub fn extract_tag_key_and_value<S: AsRef<str>>(
     tag_chunk: S,
-) -> (String, vector_core::event::metric::TagValue) {
-    use vector_core::event::metric::TagValue;
+) -> (String, vector_lib::event::metric::TagValue) {
+    use vector_lib::event::metric::TagValue;
 
     let tag_chunk = tag_chunk.as_ref();
 

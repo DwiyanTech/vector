@@ -12,13 +12,14 @@ use std::{
 use futures_util::{stream::Map, Stream, StreamExt};
 use pin_project::pin_project;
 use tower::Service;
-use vector_core::{
+use tracing::Span;
+use vector_lib::stream::{
+    batcher::{config::BatchConfig, Batcher},
+    ConcurrentMap, Driver, DriverResponse, ExpirationQueue, PartitionedBatcher,
+};
+use vector_lib::{
     event::{Finalizable, Metric},
     partition::Partitioner,
-    stream::{
-        batcher::{config::BatchConfig, Batcher},
-        ConcurrentMap, Driver, DriverResponse, ExpirationQueue, PartitionedBatcher,
-    },
     ByteSizeOf,
 };
 
@@ -44,11 +45,11 @@ pub trait SinkBuilderExt: Stream {
     /// The stream will yield batches of events, with their partition key, when either a batch fills
     /// up or times out. [`Partitioner`] operates on a per-event basis, and has access to the event
     /// itself, and so can access any and all fields of an event.
-    fn batched_partitioned<P, C, F>(
+    fn batched_partitioned<P, C, F, B>(
         self,
         partitioner: P,
         settings: F,
-    ) -> PartitionedBatcher<Self, P, ExpirationQueue<P::Key>, C, F>
+    ) -> PartitionedBatcher<Self, P, ExpirationQueue<P::Key>, C, F, B>
     where
         Self: Stream<Item = P::Item> + Sized,
         P: Partitioner + Unpin,
@@ -115,10 +116,17 @@ pub trait SinkBuilderExt: Stream {
     {
         let builder = Arc::new(builder);
 
+        // The future passed into the concurrent map is spawned in a tokio thread so we must preserve
+        // the span context in order to propagate the sink's automatic tags.
+        let span = Arc::new(Span::current());
+
         self.concurrent_map(limit, move |input| {
             let builder = Arc::clone(&builder);
+            let span = Arc::clone(&span);
 
             Box::pin(async move {
+                let _entered = span.enter();
+
                 // Split the input into metadata and events.
                 let (metadata, request_metadata_builder, events) = builder.split_input(input);
 

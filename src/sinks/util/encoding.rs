@@ -1,11 +1,11 @@
 use std::io;
 
 use bytes::BytesMut;
-use codecs::encoding::Framer;
 use itertools::{Itertools, Position};
 use tokio_util::codec::Encoder as _;
-use vector_common::request_metadata::GroupedCountByteSize;
-use vector_core::{config::telemetry, EstimatedJsonEncodedSizeOf};
+use vector_lib::codecs::encoding::Framer;
+use vector_lib::request_metadata::GroupedCountByteSize;
+use vector_lib::{config::telemetry, EstimatedJsonEncodedSizeOf};
 
 use crate::{codecs::Transformer, event::Event, internal_events::EncoderWriteError};
 
@@ -105,12 +105,11 @@ pub fn write_all(
     n_events_pending: usize,
     buf: &[u8],
 ) -> io::Result<()> {
-    writer.write_all(buf).map_err(|error| {
+    writer.write_all(buf).inspect_err(|error| {
         emit!(EncoderWriteError {
-            error: &error,
+            error,
             count: n_events_pending,
         });
-        error
     })
 }
 
@@ -146,13 +145,13 @@ where
 mod tests {
     use std::collections::BTreeMap;
 
-    use codecs::{
+    use vector_lib::codecs::{
         CharacterDelimitedEncoder, JsonSerializerConfig, NewlineDelimitedEncoder,
         TextSerializerConfig,
     };
-    use vector_common::{internal_event::CountByteSize, json_size::JsonSize};
-    use vector_core::event::LogEvent;
-    use vrl::value::Value;
+    use vector_lib::event::LogEvent;
+    use vector_lib::{internal_event::CountByteSize, json_size::JsonSize};
+    use vrl::value::{KeyString, Value};
 
     use super::*;
 
@@ -189,7 +188,7 @@ mod tests {
 
         let mut writer = Vec::new();
         let input = vec![Event::Log(LogEvent::from(BTreeMap::from([(
-            String::from("key"),
+            KeyString::from("key"),
             Value::from("value"),
         )])))];
 
@@ -217,15 +216,15 @@ mod tests {
 
         let input = vec![
             Event::Log(LogEvent::from(BTreeMap::from([(
-                String::from("key"),
+                KeyString::from("key"),
                 Value::from("value1"),
             )]))),
             Event::Log(LogEvent::from(BTreeMap::from([(
-                String::from("key"),
+                KeyString::from("key"),
                 Value::from("value2"),
             )]))),
             Event::Log(LogEvent::from(BTreeMap::from([(
-                String::from("key"),
+                KeyString::from("key"),
                 Value::from("value3"),
             )]))),
         ];
@@ -252,7 +251,7 @@ mod tests {
         let encoding = (
             Transformer::default(),
             crate::codecs::Encoder::<Framer>::new(
-                NewlineDelimitedEncoder::new().into(),
+                NewlineDelimitedEncoder::default().into(),
                 JsonSerializerConfig::default().build().into(),
             ),
         );
@@ -273,14 +272,14 @@ mod tests {
         let encoding = (
             Transformer::default(),
             crate::codecs::Encoder::<Framer>::new(
-                NewlineDelimitedEncoder::new().into(),
+                NewlineDelimitedEncoder::default().into(),
                 JsonSerializerConfig::default().build().into(),
             ),
         );
 
         let mut writer = Vec::new();
         let input = vec![Event::Log(LogEvent::from(BTreeMap::from([(
-            String::from("key"),
+            KeyString::from("key"),
             Value::from("value"),
         )])))];
         let input_json_size = input
@@ -300,7 +299,7 @@ mod tests {
         let encoding = (
             Transformer::default(),
             crate::codecs::Encoder::<Framer>::new(
-                NewlineDelimitedEncoder::new().into(),
+                NewlineDelimitedEncoder::default().into(),
                 JsonSerializerConfig::default().build().into(),
             ),
         );
@@ -308,15 +307,15 @@ mod tests {
         let mut writer = Vec::new();
         let input = vec![
             Event::Log(LogEvent::from(BTreeMap::from([(
-                String::from("key"),
+                KeyString::from("key"),
                 Value::from("value1"),
             )]))),
             Event::Log(LogEvent::from(BTreeMap::from([(
-                String::from("key"),
+                KeyString::from("key"),
                 Value::from("value2"),
             )]))),
             Event::Log(LogEvent::from(BTreeMap::from([(
-                String::from("key"),
+                KeyString::from("key"),
                 Value::from("value3"),
             )]))),
         ];
@@ -344,7 +343,7 @@ mod tests {
 
         let mut writer = Vec::new();
         let input = Event::Log(LogEvent::from(BTreeMap::from([(
-            String::from("key"),
+            KeyString::from("key"),
             Value::from("value"),
         )])));
         let input_json_size = input.estimated_json_encoded_size_of();
@@ -365,7 +364,7 @@ mod tests {
 
         let mut writer = Vec::new();
         let input = Event::Log(LogEvent::from(BTreeMap::from([(
-            String::from("message"),
+            KeyString::from("message"),
             Value::from("value"),
         )])));
         let input_json_size = input.estimated_json_encoded_size_of();
@@ -373,7 +372,7 @@ mod tests {
         let (written, json_size) = encoding.encode_input(input, &mut writer).unwrap();
         assert_eq!(written, 5);
 
-        assert_eq!(String::from_utf8(writer).unwrap(), r#"value"#);
+        assert_eq!(String::from_utf8(writer).unwrap(), r"value");
         assert_eq!(CountByteSize(1, input_json_size), json_size.size().unwrap());
     }
 }

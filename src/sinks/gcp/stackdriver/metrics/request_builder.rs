@@ -2,7 +2,7 @@ use std::io;
 
 use bytes::Bytes;
 use chrono::Utc;
-use vector_core::event::{Metric, MetricValue};
+use vector_lib::event::{Metric, MetricValue};
 
 use crate::sinks::{gcp, prelude::*, util::http::HttpRequest};
 
@@ -16,7 +16,7 @@ impl RequestBuilder<Vec<Metric>> for StackdriverMetricsRequestBuilder {
     type Events = Vec<Metric>;
     type Encoder = StackdriverMetricsEncoder;
     type Payload = Bytes;
-    type Request = HttpRequest;
+    type Request = HttpRequest<()>;
     type Error = io::Error;
 
     fn compression(&self) -> Compression {
@@ -42,7 +42,7 @@ impl RequestBuilder<Vec<Metric>> for StackdriverMetricsRequestBuilder {
         request_metadata: RequestMetadata,
         payload: EncodeResult<Self::Payload>,
     ) -> Self::Request {
-        HttpRequest::new(payload.into_payload(), metadata, request_metadata)
+        HttpRequest::new(payload.into_payload(), metadata, request_metadata, ())
     }
 }
 

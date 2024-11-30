@@ -1,7 +1,7 @@
 use std::{fmt, sync::Arc};
 
 use serde::Serialize;
-use vector_core::event::{Metric, MetricValue};
+use vector_lib::event::{Metric, MetricValue};
 use vrl::path::OwnedValuePath;
 
 use super::request_builder::HecMetricsRequestBuilder;
@@ -15,7 +15,6 @@ use crate::{
 };
 
 pub struct HecMetricsSink<S> {
-    pub context: SinkContext,
     pub service: S,
     pub batch_settings: BatcherSettings,
     pub request_builder: HecMetricsRequestBuilder,

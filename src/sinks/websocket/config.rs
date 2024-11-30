@@ -1,8 +1,8 @@
 use std::num::NonZeroU64;
 
-use codecs::JsonSerializerConfig;
 use snafu::ResultExt;
-use vector_config::configurable_component;
+use vector_lib::codecs::JsonSerializerConfig;
+use vector_lib::configurable::configurable_component;
 
 use crate::{
     codecs::EncodingConfig,
@@ -57,7 +57,7 @@ pub struct WebSocketSinkConfig {
     #[serde(
         default,
         deserialize_with = "crate::serde::bool_or_struct",
-        skip_serializing_if = "crate::serde::skip_serializing_if_default"
+        skip_serializing_if = "crate::serde::is_default"
     )]
     pub acknowledgements: AcknowledgementsConfig,
 

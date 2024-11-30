@@ -1,8 +1,8 @@
 use bytes::Bytes;
 use snafu::Snafu;
 use std::sync::Arc;
-use vector_common::request_metadata::RequestMetadata;
-use vector_core::event::{EventFinalizers, Finalizable, Metric};
+use vector_lib::event::{EventFinalizers, Finalizable, Metric};
+use vector_lib::request_metadata::RequestMetadata;
 
 use super::{
     config::{DatadogMetricsEndpoint, DatadogMetricsEndpointConfiguration},
@@ -159,7 +159,7 @@ impl IncrementalRequestBuilder<((Option<Arc<str>>, DatadogMetricsEndpoint), Vec<
                     Ok((encode_result, mut metrics)) => {
                         let finalizers = metrics.take_finalizers();
                         let metadata = DDMetricsMetadata {
-                            api_key: api_key.as_ref().map(Arc::clone),
+                            api_key: api_key.clone(),
                             endpoint,
                             finalizers,
                         };
@@ -203,7 +203,7 @@ impl IncrementalRequestBuilder<((Option<Arc<str>>, DatadogMetricsEndpoint), Vec<
                                 let chunk = metrics.split_off(split_idx);
                                 results.push(encode_now_or_never(
                                     encoder,
-                                    api_key.as_ref().map(Arc::clone),
+                                    api_key.clone(),
                                     endpoint,
                                     chunk,
                                 ));
@@ -211,7 +211,7 @@ impl IncrementalRequestBuilder<((Option<Arc<str>>, DatadogMetricsEndpoint), Vec<
                             }
                             results.push(encode_now_or_never(
                                 encoder,
-                                api_key.as_ref().map(Arc::clone),
+                                api_key.clone(),
                                 endpoint,
                                 metrics,
                             ));

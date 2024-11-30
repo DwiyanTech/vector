@@ -4,32 +4,32 @@ use chrono::{DateTime, Utc};
 use core::fmt::Debug;
 use std::collections::BTreeMap;
 
-use lookup::lookup_v2::ConfigValuePath;
-use lookup::{event_path, PathPrefix};
 use ordered_float::NotNan;
 use serde::{Deserialize, Deserializer};
-use vector_config::configurable_component;
-use vector_core::event::{LogEvent, MaybeAsLogMut};
-use vector_core::schema::meaning;
+use vector_lib::configurable::configurable_component;
+use vector_lib::event::{LogEvent, MaybeAsLogMut};
+use vector_lib::lookup::lookup_v2::ConfigValuePath;
+use vector_lib::lookup::{event_path, PathPrefix};
+use vector_lib::schema::meaning;
 use vrl::path::OwnedValuePath;
 use vrl::value::Value;
 
-use crate::{event::Event, serde::skip_serializing_if_default};
+use crate::{event::Event, serde::is_default};
 
 /// Transformations to prepare an event for serialization.
 #[configurable_component(no_deser)]
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Transformer {
     /// List of fields that are included in the encoded event.
-    #[serde(default, skip_serializing_if = "skip_serializing_if_default")]
+    #[serde(default, skip_serializing_if = "is_default")]
     only_fields: Option<Vec<ConfigValuePath>>,
 
     /// List of fields that are excluded from the encoded event.
-    #[serde(default, skip_serializing_if = "skip_serializing_if_default")]
+    #[serde(default, skip_serializing_if = "is_default")]
     except_fields: Option<Vec<ConfigValuePath>>,
 
     /// Format used for timestamp fields.
-    #[serde(default, skip_serializing_if = "skip_serializing_if_default")]
+    #[serde(default, skip_serializing_if = "is_default")]
     timestamp_format: Option<TimestampFormat>,
 }
 
@@ -150,7 +150,7 @@ impl Transformer {
                 let mut new_log = LogEvent::from(old_value);
                 if let Some(service) = new_log.remove(service_path) {
                     log.metadata_mut()
-                        .add_dropped_field(meaning::SERVICE.to_string(), service);
+                        .add_dropped_field(meaning::SERVICE.into(), service);
                 }
             }
         }
@@ -171,7 +171,7 @@ impl Transformer {
                 if let (Some(v), Some(service_path)) = (value, service_path) {
                     if service_path.path == *value_path {
                         log.metadata_mut()
-                            .add_dropped_field(meaning::SERVICE.to_string(), v);
+                            .add_dropped_field(meaning::SERVICE.into(), v);
                     }
                 }
             }
@@ -266,9 +266,9 @@ pub enum TimestampFormat {
 #[cfg(test)]
 mod tests {
     use indoc::indoc;
-    use lookup::path::parse_target_path;
-    use vector_common::btreemap;
-    use vector_core::config::{log_schema, LogNamespace};
+    use vector_lib::btreemap;
+    use vector_lib::config::{log_schema, LogNamespace};
+    use vector_lib::lookup::path::parse_target_path;
     use vrl::value::Kind;
 
     use crate::config::schema;
@@ -375,10 +375,7 @@ mod tests {
         let mut base = Event::Log(LogEvent::from("Demo"));
         let timestamp = base
             .as_mut_log()
-            .get((
-                lookup::PathPrefix::Event,
-                log_schema().timestamp_key().unwrap(),
-            ))
+            .get((PathPrefix::Event, log_schema().timestamp_key().unwrap()))
             .unwrap()
             .clone();
         let timestamp = timestamp.as_timestamp().unwrap();
@@ -407,11 +404,8 @@ mod tests {
 
             for actual in [
                 // original key
-                log.get((
-                    lookup::PathPrefix::Event,
-                    log_schema().timestamp_key().unwrap(),
-                ))
-                .unwrap(),
+                log.get((PathPrefix::Event, log_schema().timestamp_key().unwrap()))
+                    .unwrap(),
                 // second key
                 log.get("another").unwrap(),
             ] {

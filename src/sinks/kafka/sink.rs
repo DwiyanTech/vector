@@ -1,15 +1,14 @@
 use rdkafka::{
-    consumer::{BaseConsumer, Consumer},
     error::KafkaError,
-    producer::FutureProducer,
+    producer::{BaseProducer, FutureProducer, Producer},
     ClientConfig,
 };
 use snafu::{ResultExt, Snafu};
 use tokio::time::Duration;
-use tower::limit::ConcurrencyLimit;
+use tracing::Span;
 use vrl::path::OwnedTargetPath;
 
-use super::config::{KafkaRole, KafkaSinkConfig};
+use super::config::KafkaSinkConfig;
 use crate::{
     kafka::KafkaStatisticsContext,
     sinks::kafka::{request_builder::KafkaRequestBuilder, service::KafkaService},
@@ -21,8 +20,6 @@ use crate::{
 pub(super) enum BuildError {
     #[snafu(display("creating kafka producer failed: {}", source))]
     KafkaCreateFailed { source: KafkaError },
-    #[snafu(display("invalid topic template: {}", source))]
-    TopicTemplate { source: TemplateParseError },
 }
 
 pub struct KafkaSink {
@@ -38,14 +35,17 @@ pub(crate) fn create_producer(
     client_config: ClientConfig,
 ) -> crate::Result<FutureProducer<KafkaStatisticsContext>> {
     let producer = client_config
-        .create_with_context(KafkaStatisticsContext::default())
+        .create_with_context(KafkaStatisticsContext {
+            expose_lag_metrics: false,
+            span: Span::current(),
+        })
         .context(KafkaCreateFailedSnafu)?;
     Ok(producer)
 }
 
 impl KafkaSink {
     pub(crate) fn new(config: KafkaSinkConfig) -> crate::Result<Self> {
-        let producer_config = config.to_rdkafka(KafkaRole::Producer)?;
+        let producer_config = config.to_rdkafka()?;
         let producer = create_producer(producer_config)?;
         let transformer = config.encoding.transformer();
         let serializer = config.encoding.build()?;
@@ -62,11 +62,6 @@ impl KafkaSink {
     }
 
     async fn run_inner(self: Box<Self>, input: BoxStream<'_, Event>) -> Result<(), ()> {
-        // rdkafka will internally retry forever, so we need some limit to prevent this from overflowing.
-        // 64 should be plenty concurrency here, as a rdkafka send operation does not block until its underlying
-        // buffer is full.
-        let service = ConcurrencyLimit::new(self.service.clone(), 64);
-
         let request_builder = KafkaRequestBuilder {
             key_field: self.key_field,
             headers_key: self.headers_key,
@@ -100,8 +95,7 @@ impl KafkaSink {
                     Ok(req) => Some(req),
                 }
             })
-            .into_driver(service)
-            .protocol("kafka")
+            .into_driver(self.service)
             .protocol("kafka")
             .run()
             .await
@@ -110,23 +104,27 @@ impl KafkaSink {
 
 pub(crate) async fn healthcheck(config: KafkaSinkConfig) -> crate::Result<()> {
     trace!("Healthcheck started.");
-    let client = config.to_rdkafka(KafkaRole::Consumer).unwrap();
-    let topic = match config.topic.render_string(&LogEvent::from_str_legacy("")) {
-        Ok(topic) => Some(topic),
-        Err(error) => {
-            warn!(
-                message = "Could not generate topic for healthcheck.",
-                %error,
-            );
-            None
-        }
+    let client_config = config.to_rdkafka().unwrap();
+    let topic: Option<String> = match config.healthcheck_topic {
+        Some(topic) => Some(topic),
+        _ => match config.topic.render_string(&LogEvent::from_str_legacy("")) {
+            Ok(topic) => Some(topic),
+            Err(error) => {
+                warn!(
+                    message = "Could not generate topic for healthcheck.",
+                    %error,
+                );
+                None
+            }
+        },
     };
 
     tokio::task::spawn_blocking(move || {
-        let consumer: BaseConsumer = client.create().unwrap();
+        let producer: BaseProducer = client_config.create().unwrap();
         let topic = topic.as_ref().map(|topic| &topic[..]);
 
-        consumer
+        producer
+            .client()
             .fetch_metadata(topic, Duration::from_secs(3))
             .map(|_| ())
     })

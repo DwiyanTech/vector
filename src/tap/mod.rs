@@ -5,7 +5,7 @@ use clap::Parser;
 pub(crate) use cmd::cmd;
 pub use cmd::tap;
 use url::Url;
-use vector_api_client::gql::TapEncodingFormat;
+use vector_lib::api_client::gql::TapEncodingFormat;
 
 use crate::config::api::default_graphql_url;
 
@@ -52,6 +52,10 @@ pub struct Opts {
     /// Whether to reconnect if the underlying API connection drops. By default, tap will attempt to reconnect if the connection drops.
     #[arg(short, long)]
     no_reconnect: bool,
+
+    /// Specifies a duration (in milliseconds) to sample logs (e.g. specifying 10000 will sample logs for 10 seconds then exit)
+    #[arg(short = 'd', long)]
+    duration_ms: Option<u64>,
 }
 
 impl Opts {
